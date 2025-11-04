@@ -2,10 +2,13 @@ from mache.spack.config_machines import (
     config_to_shell_script as config_to_shell_script,
 )
 from mache.spack.config_machines import (
-    extract_machine_config as extract_machine_config,
+    extract_env_var_commands_from_config_machines as extract_env_var_commands_from_config_machines,  # noqa: E501
 )
 from mache.spack.config_machines import (
-    extract_spack_from_config_machines as extract_spack_from_config_machines,
+    extract_module_commands_from_config_machines as extract_module_commands_from_config_machines,  # noqa: E501
+)
+from mache.spack.config_machines import (
+    extract_spack_script_from_config_machines as extract_spack_script_from_config_machines,  # noqa: E501
 )
 from mache.spack.env import (
     get_modules_env_vars_and_mpi_compilers as get_modules_env_vars_and_mpi_compilers,  # noqa: E501

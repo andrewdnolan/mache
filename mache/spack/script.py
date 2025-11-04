@@ -3,7 +3,9 @@ from importlib import resources as importlib_resources
 from jinja2 import Template
 
 from mache.machine_info import discover_machine
-from mache.spack.config_machines import extract_spack_from_config_machines
+from mache.spack.config_machines import (
+    extract_spack_script_from_config_machines,
+)
 
 
 def get_spack_script(
@@ -77,7 +79,7 @@ def get_spack_script(
 
     # start with the shell script from the config_machines.xml for the
     # given machine, compiler, and mpi
-    load_script_template += '\n' + extract_spack_from_config_machines(
+    load_script_template += '\n' + extract_spack_script_from_config_machines(
         machine, compiler, mpi, shell
     )
 

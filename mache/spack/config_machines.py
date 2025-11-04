@@ -5,26 +5,33 @@ from importlib import resources as importlib_resources
 from lxml import etree
 
 
-def extract_machine_config(xml_file, machine, compiler, mpilib):
+def extract_machine_config(machine, compiler, mpilib, xml_file=None):
     """
     Extract the machine configuration from the XML file.
 
     Parameters
     ----------
-    xml_file : str
-        Path to the XML file.
     machine : str
         Machine name.
     compiler : str
         Compiler name.
     mpilib : str
         MPI library name.
+    xml_file : str, optional
+        Path to the XML file. If nothing is provided, use the path to
+        the "config_machines.xml" packaged with mache
 
     Returns
     -------
     etree.Element or None
         The XML element of the machine configuration if found, otherwise None.
     """
+    if xml_file is None:
+        xml_file = (
+            importlib_resources.files('mache.cime_machine_config')
+            / 'config_machines.xml'
+        )
+
     tree = etree.parse(xml_file)
     root = tree.getroot()
 
@@ -121,7 +128,7 @@ def config_to_shell_script(config, shell_type):
     return '\n'.join(script_lines)
 
 
-def extract_spack_from_config_machines(
+def extract_spack_script_from_config_machines(
     machine, compiler, mpilib, shell, output=None
 ):
     """
@@ -145,24 +152,130 @@ def extract_spack_from_config_machines(
     script: str
         The generated shell script as a string.
     """
-    config_filename = (
-        importlib_resources.files('mache.cime_machine_config')
-        / 'config_machines.xml'
+
+    script = ''
+
+    script += extract_module_commands_from_config_machines(
+        machine, compiler, mpilib, shell
     )
 
-    config = extract_machine_config(config_filename, machine, compiler, mpilib)
-    if config is None:
-        raise ValueError(
-            f'No configuration found for machine={machine}, '
-            f'compiler={compiler}, mpilib={mpilib}'
-        )
+    script += extract_env_var_commands_from_config_machines(
+        machine, compiler, mpilib, shell
+    )
 
-    script = config_to_shell_script(config, shell)
     if output is not None:
         with open(output, 'w') as f:
             f.write(script)
 
     return script
+
+
+def extract_module_commands_from_config_machines(
+    machine, compiler, mpilib, shell
+):
+    """
+    Extract module commands from XML
+
+    Parameters
+    ----------
+    machine : str
+        Machine name.
+    compiler : str
+        Compiler name.
+    mpilib : str
+        MPI library name.
+    shell : str
+        Shell script type ('sh' or 'csh').
+
+    Returns
+    -------
+    script_lines: str
+        The generated shell commands as a string
+    """
+    script_lines = []
+
+    config = extract_machine_config(machine, compiler, mpilib)
+
+    # TODO: possibly replace \: with :
+    init_path = None
+    for init in config.findall('.//module_system/init_path'):
+        if init.get('lang') == shell:
+            init_path = init.text
+            break
+
+    if init_path is not None:
+        init_path = init_path.replace(';', '\n')
+        script_lines.append(f'source {init_path}')
+        script_lines.append('')
+
+    module_commands = defaultdict(list)
+    e3sm_hdf5_netcdf_modules = defaultdict(list)
+    for module in config.findall('.//module_system/modules'):
+        for command in module.findall('command'):
+            name = command.get('name')
+            value = command.text
+            if value:
+                if 'command' != 'unload' and 'python' in value:
+                    # we don't want to load E3SM's python module
+                    continue
+                elif 'command' != 'unload' and re.search(
+                    r'hdf5|netcdf', value, re.IGNORECASE
+                ):
+                    # we want to remove hdf5 and netcdf in all cases
+                    e3sm_hdf5_netcdf_modules[name].append(value)
+                else:
+                    module_commands[name].append(value)
+            elif name not in module_commands:
+                module_commands[name] = []
+
+    script_lines.extend(
+        _convert_module_commands_to_script_lines(module_commands, shell)
+    )
+    script_lines.append('')
+
+    if e3sm_hdf5_netcdf_modules:
+        script_lines.append('{%- if e3sm_hdf5_netcdf %}')
+        script_lines.extend(
+            _convert_module_commands_to_script_lines(
+                e3sm_hdf5_netcdf_modules, shell
+            )
+        )
+        script_lines.append('{%- endif %}')
+        script_lines.append('')
+
+    return '\n'.join(script_lines)
+
+
+def extract_env_var_commands_from_config_machines(
+    machine, compiler, mpilib, shell
+):
+    """
+    Extract environment variables commands from XML
+
+    Parameters
+    ----------
+    machine : str
+        Machine name.
+    compiler : str
+        Compiler name.
+    mpilib : str
+        MPI library name.
+    shell : str
+        Shell script type ('sh' or 'csh').
+
+    Returns
+    -------
+    script_lines: str
+        The generated shell commands as a string
+    """
+    script_lines = ['']
+
+    config = extract_machine_config(machine, compiler, mpilib)
+
+    script_lines.extend(_convert_env_vars_to_script_lines(config, shell))
+    script_lines.append('')
+
+    return '\n'.join(script_lines)
 
 
 def _convert_module_commands_to_script_lines(module_commands, shell_type):
@@ -268,5 +381,6 @@ def _convert_env_vars_to_script_lines(config, shell_type):
             elif shell_type == 'csh':
                 script_lines.append(f'setenv {name} "{value}"')
         script_lines.append('{%- endif %}')
+        script_lines.append('')
 
     return script_lines
